@@ -5,17 +5,17 @@ Created on Tue Nov 28 16:23:47 2023
 @author: BrandonLester
 """
 
+import pandas as pd
+from pandas.tseries.holiday import USFederalHolidayCalendar
+from datetime import datetime, timedelta, date
+import numpy as np
+import holidays
 
 
-def create_holiday_df(days_before):
-    
-    import pandas as pd
-    from pandas.tseries.holiday import USFederalHolidayCalendar
-    from datetime import datetime, timedelta
-    import numpy as np
+def create_yearend_holiday_df(days_before, start_date, end_date):
 
     cal = USFederalHolidayCalendar()
-    holidays = cal.holidays(start='2020-01-01', end='2022-12-31').to_pydatetime()
+    holidays = cal.holidays(start=start_date, end=end_date).to_pydatetime()
 
     df_holidays = pd.DataFrame({"date": holidays})
 
@@ -51,4 +51,17 @@ def create_holiday_df(days_before):
     return df_predates
 
 
-df_holidays = create_holiday_df(5)
+df_yearend_holidays = create_yearend_holiday_df(3, '2020-01-01', '2022-12-31')
+df_yearend_holidays = df_yearend_holidays.drop(["thanksgiving", "christmas", "month", "date"], axis = 1).reset_index(drop=True)
+
+
+us_holidays = holidays.country_holidays("US")
+
+dates = pd.date_range(start="2020-10-01", end="2022-12-31")
+holiday_name = [us_holidays.get(x) for x in dates]
+
+df_holidays = pd.DataFrame({"date": dates, "holiday": holiday_name})
+df_holidays["flag"] = np.where(df_holidays["holiday"].isnull(), 0, 1)
+df_holidays = df_holidays[df_holidays["flag"] == 1].reset_index(drop=True)
+
+df_holidays_wide = df_holidays.pivot(index="date", columns="holiday", values="flag").fillna(0).reset_index()
