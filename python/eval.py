@@ -23,6 +23,11 @@ data_path = cur_dir / "data"
 data_filename = "Cincinnati Division Forecast Pilot Data.xlsx"
 data_sheetname = "Forecast Data"
 
+results_filename = "Doug File.xlsx"
+results_sheetname = "Export"
+
+forecast_filename = "prophet_full_forecast_4.2.20start.csv"
+
 #%% FUNCTIONS
 def add_fake_forecasts(df_input, error_size, colname):
     df = df_input.copy()
@@ -81,70 +86,126 @@ def create_value_bins(input_value, bin_size):
 
 
 def plot_error_distribution(df, colname):
-    sns.histplot(data = df_data, x = colname + "_forecast_error_pct", binwidth=0.1)
+    sns.histplot(data = df, x = colname + "_forecast_error_pct", binwidth=0.1)
     plt.title(colname.title() + " Forecast Error Distribution")
     plt.xlabel("Error Percentage (%)")
     plt.ylabel("Store / Day Occurences")
     plt.xticks(plt.xticks()[0], [int(x * 100) for x in plt.xticks()[0]])
 
 #%% DATA PREP
+
+
+### TRAINING DATA WITH FORECAST PERIOD
 data_import = pd.read_excel(data_path / data_filename, sheet_name = data_sheetname)
 
-df_data = data_import[data_import["PICKUP_DT"] >= "10-1-2022"].reset_index(drop=True)
-df_data = df_data.rename(columns = {"All_Orders" : "ACTUAL_ORDERS"})
-df_data = df_data[["PICKUP_DT", "DIVISION_NO", "STORE_NO", "ACTUAL_ORDERS"]]
-df_data = df_data.set_axis([x.lower() for x in df_data.columns], axis = 1)
+#df_data = data_import[data_import["PICKUP_DT"] >= "10-1-2022"].reset_index(drop=True)
+#df_data = df_data.rename(columns = {"All_Orders" : "ACTUAL_ORDERS"})
+#df_data = df_data[["PICKUP_DT", "DIVISION_NO", "STORE_NO", "ACTUAL_ORDERS"]]
+df_data = data_import.set_axis([x.lower() for x in data_import.columns], axis = 1)
+df_data = df_data.rename(columns = {"orders packed" : "orders_packed"})
+df_data["division_no"] = df_data["division_no"].astype(str)
+df_data["store_no"] = df_data["store_no"].astype(str)
+
+# df_data = add_fake_forecasts(df_data, 30, "manual")
+# df_data = add_fake_forecasts(df_data, 15, "auto")
 
 
-df_data = add_fake_forecasts(df_data, 30, "manual")
-df_data = add_fake_forecasts(df_data, 15, "auto")
+### FORECAST PERIOD ACTUAL AND KROGER FORECAST
+results_import = pd.read_excel(data_path / results_filename, sheet_name = results_sheetname)
 
+df_results = results_import.rename(columns = {"DATE": "pickup_dt", 
+                                              "Kroger Published Forecast": "manual_forecast_orders",
+                                              "Actual Orders": "actual_orders"})
+
+df_results = df_results[~df_results["Key"].isnull()]
+df_results = df_results[~df_results["actual_orders"].isnull()]
+
+df_results["division_no"] = [x.split("_")[0][1:] for x in df_results["Key"]]
+df_results["store_no"] = [x.split("_")[1][2:] for x in df_results["Key"]]
+
+df_results = df_results[["pickup_dt", "division_no", "store_no", "actual_orders", "manual_forecast_orders"]]
+df_results["actual_orders"] = df_results["actual_orders"].astype(int)
+df_results["manual_forecast_orders"] = df_results["manual_forecast_orders"].astype(int)
+df_results["pickup_dt"] = pd.to_datetime(df_results["pickup_dt"])
+
+
+### AMEND FORECASTED VALUES
+forecast_import = pd.read_csv(data_path / forecast_filename)
+df_forecast = forecast_import.rename(columns = {"ds": "pickup_dt", "store": "store_no", "yhat": "auto_forecast_orders"})
+df_forecast = df_forecast.iloc[:,1:].astype({"store_no": "str"})
+df_forecast["pickup_dt"] = pd.to_datetime(df_forecast["pickup_dt"])
+
+
+
+### JOIN ALL 3
+df_results = df_results.merge(df_forecast, on = ["pickup_dt", "store_no"])
+df_results["auto_forecast_orders"] = np.where(df_results["auto_forecast_orders"] < 0, 0, round(df_results["auto_forecast_orders"]))
+df_results["auto_forecast_orders"] = df_results["auto_forecast_orders"].astype(int)
+df_results = df_results.merge(df_data.drop("division_no", axis=1), on = ["pickup_dt", "store_no"], how = "left")
+
+
+
+df_results["manual_forecast_error_pct"] = (df_results["manual_forecast_orders"] - df_results["actual_orders"]) / df_results["actual_orders"]
+df_results["auto_forecast_error_pct"] = (df_results["auto_forecast_orders"] - df_results["actual_orders"]) / df_results["actual_orders"]
 
 #%% EVALUATION
 
 # ACCURACY METRICS
-manual_metrics = calc_metrics(ytrue = df_data["actual_orders"], 
-                              ypred = df_data["manual_forecast_orders"])
+manual_metrics = calc_metrics(ytrue = df_results["actual_orders"], 
+                              ypred = df_results["manual_forecast_orders"])
 
 print_metrics(manual_metrics, "\nMANUAL METRICS")
 
-auto_metrics = calc_metrics(ytrue = df_data["actual_orders"], 
-                              ypred = df_data["auto_forecast_orders"])
+auto_metrics = calc_metrics(ytrue = df_results["actual_orders"], 
+                              ypred = df_results["auto_forecast_orders"])
 
 print_metrics(auto_metrics, "\nAUTO METRICS")
 
 
 # RESIDUAL DISTRIBUTION
-df_data["manual_error_bin"] = df_data["manual_forecast_error"].apply(lambda x: create_value_bins(x, 10)["bin_number"])
-sns.histplot(data = df_data, x = "manual_error_bin", binwidth=1)
+df_results["manual_error_bin"] = df_results["manual_forecast_error"].apply(lambda x: create_value_bins(x, 10)["bin_number"])
+sns.histplot(data = df_results, x = "manual_error_bin", binwidth=1)
 
-df_data["auto_error_bin"] = df_data["auto_forecast_error"].apply(lambda x: create_value_bins(x, 10)["bin_number"])
-sns.histplot(data = df_data, x = "auto_error_bin", binwidth=1)
+df_results["auto_error_bin"] = df_results["auto_forecast_error"].apply(lambda x: create_value_bins(x, 10)["bin_number"])
+sns.histplot(data = df_results, x = "auto_error_bin", binwidth=1)
 
-
-plot_error_distribution(df_data, "manual")
-plot_error_distribution(df_data, "auto")
+#TODO: bucket anything larger than x%
+plot_error_distribution(df_results, "manual")
+plot_error_distribution(df_results, "auto")
 
 
 
 # STORE SEGMENTATION
-df_accuracy_agg = df_data \
-    .groupby("store_no") \
-    .agg({"actual_orders": lambda x: metrics.mean_absolute_error(y_true = x, y_pred = df_data.loc[x.index, "manual_forecast_orders"])}) \
-    .reset_index() \
-    .rename(columns = {"actual_orders" : "mae"}) \
 
-df_orders_agg = df_data.groupby("store_no").agg({"actual_orders": ["sum", "mean"],
-                                 "manual_forecast_orders": ["sum", "mean"],
-                                 "auto_forecast_orders": ["sum", "mean"]}).reset_index()
+def accuracy_by_store(df, colname):
+    
+    pred_name = colname+"_forecast_orders"
+    mae_name = colname+"_mae"
+    
+    return_df = df \
+        .groupby("store_no") \
+        .agg({"actual_orders": lambda x: metrics.mean_absolute_error(y_true = x, y_pred = df_results.loc[x.index, pred_name])}) \
+        .reset_index() \
+        .rename(columns = {"actual_orders" : mae_name})
+        
+    return return_df
+
+df_manual_acc = accuracy_by_store(df_results, "manual")
+df_auto_acc = accuracy_by_store(df_results, "auto")
+
+
+df_orders_agg = df_results.groupby("store_no").agg({"actual_orders": ["sum", "mean"],
+                                                    "manual_forecast_orders": ["sum", "mean"],
+                                                    "auto_forecast_orders": ["sum", "mean"]}).reset_index()
     
 
 df_orders_agg.columns = ["store_no"] + [f'{col}_{agg}' for col, agg in df_orders_agg.columns][1:]
 
 
-df_store_agg = df_accuracy_agg.merge(df_orders_agg, on = "store_no")
+df_store_agg = df_orders_agg.merge(df_manual_acc, on = "store_no").merge(df_auto_acc, on = "store_no")
 
-sns.scatterplot(df_store_agg, x = "actual_orders_sum", y = "mae")
+sns.scatterplot(df_store_agg, x = "actual_orders_sum", y = "manual_mae")
+sns.scatterplot(df_store_agg, x = "actual_orders_sum", y = "auto_mae")
 
 
 # IMPORTANT FACTORS
