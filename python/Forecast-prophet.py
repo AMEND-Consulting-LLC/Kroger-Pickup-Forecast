@@ -19,6 +19,7 @@ parent_dir = parent_dir.replace("\\", "/")
 
 # Define file path for input data
 file_path = parent_dir + "/data/"
+output_path = file_path + '/output/'
 
 # %% set dates
 
@@ -34,23 +35,38 @@ df = df.drop(df[df['STORE_NO'].isin({305, 922, 400, 789, 430, 800, 506, 504})].i
 # List of holidays
 prethanksgiving = pd.DataFrame({
   'holiday': 'prethanksgiving',
+  'ds': pd.to_datetime(['2020-11-21', '2021-11-23', '2022-11-22']),
+  'lower_window': -1,
+  'upper_window': 0,
+})
+thankseve = pd.DataFrame({
+  'holiday': 'thankseve',
   'ds': pd.to_datetime(['2020-11-22', '2021-11-24', '2022-11-23']),
-  'lower_window': -2,
+  'lower_window': 0,
   'upper_window': 0,
 })
 prechristmas = pd.DataFrame({
   'holiday': 'prechristmas',
-  'ds': pd.to_datetime(['2020-12-24', '2021-12-24', '2022-12-24']),
-  'lower_window': -2,
+  'ds': pd.to_datetime(['2020-12-23', '2021-12-23', '2022-12-23']),
+  'lower_window': -1,
   'upper_window': 0,
 })
-holidays = pd.concat((prethanksgiving, prechristmas))
+christeve = pd.DataFrame({
+  'holiday': 'christeve',
+  'ds': pd.to_datetime(['2020-12-24', '2021-12-24', '2022-12-24']),
+  'lower_window': 0,
+  'upper_window': 0,
+})
+holidays = pd.concat((prethanksgiving, prechristmas, thankseve, christeve))
 
 # %%create forecast for each store
+startdate_final = pd.read_csv(output_path + 'prophet_startdate.csv')
+Store_Startdate = startdate_final.groupby(['StartDate', 'Store'], as_index=False)['MAE'].mean()
+Best_Store_Startdate = Store_Startdate.set_index('StartDate').groupby('Store', as_index=False).idxmin()
 
 # Initialize an empty dictionary to store MAE for each store
-mae_per_store = {}
-
+df_mae = pd.DataFrame(columns = ['Store', 'StartDate', 'Week', 'MAE'])
+full_forecast = pd.DataFrame(columns = ['ds', 'store', 'yhat'])
 
 # Perform forecasting for each store separately
 for store_id in df[df['ds'] == '2022-10-08']['STORE_NO'].unique():
@@ -58,12 +74,13 @@ for store_id in df[df['ds'] == '2022-10-08']['STORE_NO'].unique():
     mae_per_week = {}
     full_store_data = df[df['STORE_NO'] == store_id].copy()
     for week in range(8):
+        startdate = Best_Store_Startdate[Best_Store_Startdate['Store'] == store_id]['MAE'].values[0]
         forecast_start = pd.to_datetime('2022-11-06') +pd.DateOffset(weeks=week)
         forecast_end = pd.to_datetime(forecast_start) + pd.DateOffset(days=6)
         forecast_dates = pd.date_range(start=forecast_start, end=forecast_end, freq='D')
         if pd.to_datetime('2022-12-25') in forecast_dates:
             forecast_dates = forecast_dates.delete(forecast_dates.get_loc(pd.to_datetime('2022-12-25')))
-        dates = pd.date_range(start='2020-10-01', end=pd.to_datetime(forecast_start) + pd.DateOffset(days=-29), freq='D')
+        dates = pd.date_range(start=pd.to_datetime(startdate), end=pd.to_datetime(forecast_start) + pd.DateOffset(days=-29), freq='D')
 
         store_data = full_store_data[full_store_data['ds'].isin(dates)]
 
@@ -85,15 +102,22 @@ for store_id in df[df['ds'] == '2022-10-08']['STORE_NO'].unique():
         used_actuals = full_store_data[full_store_data['ds'].isin(forecast_dates)]
         actual_values = used_actuals['y']
         used_forecast = forecast[forecast['ds'].isin(forecast_dates)]
-        predicted_values = used_forecast['yhat']
-        mae = mean_absolute_error(actual_values, predicted_values)
-        mae_per_week[week] = mae
-    store_mae = sum(mae_per_week.values())/len(mae_per_week)
-    print(store_mae)
-    mae_per_store[store_id] = store_mae
+        used_forecast['store'] = store_id
+        predicted_values = pd.DataFrame(used_forecast[{'store', 'ds','yhat'}])
+        # mae = mean_absolute_error(actual_values, predicted_values)
+        full_forecast = full_forecast.append(predicted_values)
+        # mae_per_week[week] = mae
+        # df_mae.loc[len(df_mae.index)] = [store_id, startdate, week, mae] 
+    # store_mae = sum(mae_per_week.values())/len(mae_per_week)
+    # print(df_mae)
+    # print(store_mae)
+
 
 # print("Mean Absolute Error (MAE) for Each Store:")
 # for store_id, mae in mae_per_store.items():
 #     print(f"Store {store_id}: MAE = {mae}")
 
+# %%
+# df_mae.to_csv(output_path + "prophet_startdate.csv")
+full_forecast.to_csv(output_path + "prophet_full_forecast_storespecificstart_eves.csv")
 # %%
