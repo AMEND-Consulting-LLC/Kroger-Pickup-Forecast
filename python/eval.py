@@ -26,8 +26,8 @@ data_sheetname = "Forecast Data"
 results_filename = "Doug File.xlsx"
 results_sheetname = "Export"
 
-forecast_filename = "official_forecast.xlsx"
-forecast_sheetname = "forecast_by_day"
+forecast_filename = "prophet_full_forecast_storespecificstart_eves_dayafter_noprechrist_postthanks.csv"
+#forecast_sheetname = "forecast_by_day"
 
 #%% FUNCTIONS
 def add_fake_forecasts(df_input, error_size, colname):
@@ -154,7 +154,7 @@ df_results["pickup_dt"] = pd.to_datetime(df_results["pickup_dt"])
 
 
 ### AMEND FORECASTED VALUES
-forecast_import = pd.read_excel(data_path / forecast_filename, sheet_name = forecast_sheetname)
+forecast_import = pd.read_csv(data_path / forecast_filename)
 df_forecast = forecast_import.rename(columns = {"ds": "pickup_dt", "store": "store_no", "yhat": "auto_forecast_orders"})
 df_forecast = df_forecast.iloc[:,1:].astype({"store_no": "str"})
 df_forecast["pickup_dt"] = pd.to_datetime(df_forecast["pickup_dt"])
@@ -209,11 +209,11 @@ print_metrics(auto_metrics, "\nAUTO METRICS")
 # sns.histplot(data = df_results, x = "auto_error_bin", binwidth=1)
 
 
-df_results["manual_forecast_error_pct_plot"] = np.where(df_results["manual_forecast_error_pct"] > 0.5, 0.6, df_results["manual_forecast_error_pct"])
-df_results["manual_forecast_error_pct_plot"] = np.where(df_results["manual_forecast_error_pct_plot"] < -0.5, -0.6, df_results["manual_forecast_error_pct_plot"])
+df_results["manual_forecast_error_pct_plot"] = np.where(df_results["manual_forecast_error_pct"] > 0.5, 0.59, df_results["manual_forecast_error_pct"])
+df_results["manual_forecast_error_pct_plot"] = np.where(df_results["manual_forecast_error_pct_plot"] < -0.5, -0.59, df_results["manual_forecast_error_pct_plot"])
 
-df_results["auto_forecast_error_pct_plot"] = np.where(df_results["auto_forecast_error_pct"] > 0.5, 0.6, df_results["auto_forecast_error_pct"])
-df_results["auto_forecast_error_pct_plot"] = np.where(df_results["auto_forecast_error_pct_plot"] < -0.5, -0.6, df_results["auto_forecast_error_pct_plot"])
+df_results["auto_forecast_error_pct_plot"] = np.where(df_results["auto_forecast_error_pct"] > 0.5, 0.59, df_results["auto_forecast_error_pct"])
+df_results["auto_forecast_error_pct_plot"] = np.where(df_results["auto_forecast_error_pct_plot"] < -0.5, -0.59, df_results["auto_forecast_error_pct_plot"])
 
 
 #TODO: bucket anything larger than x%
